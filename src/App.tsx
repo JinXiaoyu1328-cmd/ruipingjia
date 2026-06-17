@@ -474,6 +474,12 @@ function sanitizeGeneratedText(text: string, purpose: "critique" | "magic") {
   return clean.slice(0, purpose === "magic" ? 58 : 32);
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 async function requestDeepSeekText({
   analysis,
   domain,
@@ -487,10 +493,15 @@ async function requestDeepSeekText({
   purpose: "critique" | "magic";
   writingText?: string;
 }) {
+  const env = import.meta.env as Record<string, string | undefined>;
+  const endpoint = env.VITE_DEEPSEEK_CRITIQUE_ENDPOINT || "/api/deepseek-critique";
+  const timeoutMs = purpose === "magic" ? 20_000 : 12_000;
+  const minimumWaitMs = purpose === "magic" ? 2400 : 1800;
+  const startedAt = Date.now();
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), purpose === "magic" ? 1600 : 900);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch("/api/deepseek-critique", {
+    const response = await fetch(endpoint, {
       body: JSON.stringify({
         analysis,
         domain,
@@ -509,6 +520,10 @@ async function requestDeepSeekText({
     return "";
   } finally {
     window.clearTimeout(timeout);
+    const elapsed = Date.now() - startedAt;
+    if (elapsed < minimumWaitMs) {
+      await wait(minimumWaitMs - elapsed);
+    }
   }
 }
 
@@ -2947,7 +2962,7 @@ function App() {
     const critiqueDomain = route.domain === "home" ? "food" : route.domain;
     const judge = foodJudges[index] || judgePoolsByDomain[critiqueDomain]?.[index] || foodJudgePool[index];
     const bubbleId = foodBubbleIdRef.current;
-    const fallbackText = pickCritiqueLine(judge, uploadedFoodAnalysis, critiqueDomain);
+    const pendingText = isEmojiOnly(pickCritiqueLine(judge, uploadedFoodAnalysis, critiqueDomain)) ? "憋大招中……" : "评委正在锐评……";
     setFoodJudgeBubbles((current) => [
       ...current,
       {
@@ -2955,7 +2970,7 @@ function App() {
         judgeId: judge.id,
         projectile: pickProjectile(),
         slot: index,
-        text: fallbackText,
+        text: pendingText,
       },
     ]);
     const generatedText = await requestDeepSeekText({
@@ -2965,8 +2980,8 @@ function App() {
       purpose: "critique",
       writingText,
     });
-    if (!generatedText || generatedText === fallbackText) return;
-    setFoodJudgeBubbles((current) => current.map((bubble) => (bubble.id === bubbleId ? { ...bubble, text: generatedText } : bubble)));
+    const finalText = generatedText || pickCritiqueLine(judge, uploadedFoodAnalysis, critiqueDomain);
+    setFoodJudgeBubbles((current) => current.map((bubble) => (bubble.id === bubbleId ? { ...bubble, text: finalText } : bubble)));
   }
 
   async function handleDownloadCritique() {
@@ -3183,7 +3198,7 @@ function App() {
             const judge = foodJudges[index] || null;
             const fallbackAdvice = buildMagicAdvice(judge, uploadedFoodAnalysis.kind, flow.domain);
             setMagicJudgeIndex(index);
-            setMagicAdviceText(fallbackAdvice);
+            setMagicAdviceText("评委正在憋一个很损的建议……");
             setFoodModal("magic-result");
             if (flow.domain === "music") {
               showFoodToast("正在播放魔性魔改版本", 1800);
@@ -3196,7 +3211,7 @@ function App() {
               purpose: "magic",
               writingText,
             }).then((text) => {
-              if (text) setMagicAdviceText(text);
+              setMagicAdviceText(text || fallbackAdvice);
             });
           }}
           onBombExplode={() => setFoodBombImpactCount((current) => current + 1)}
