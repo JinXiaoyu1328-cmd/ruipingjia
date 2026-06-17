@@ -487,6 +487,8 @@ async function requestDeepSeekText({
   purpose: "critique" | "magic";
   writingText?: string;
 }) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), purpose === "magic" ? 1600 : 900);
   try {
     const response = await fetch("/api/deepseek-critique", {
       body: JSON.stringify({
@@ -498,13 +500,25 @@ async function requestDeepSeekText({
       }),
       headers: { "Content-Type": "application/json" },
       method: "POST",
+      signal: controller.signal,
     });
     if (!response.ok) return "";
     const data = (await response.json()) as { text?: string };
     return sanitizeGeneratedText(String(data.text || ""), purpose);
   } catch {
     return "";
+  } finally {
+    window.clearTimeout(timeout);
   }
+}
+
+function preloadImages(srcs: Array<string | null | undefined>) {
+  const uniqueSrcs = Array.from(new Set(srcs.filter(Boolean) as string[]));
+  uniqueSrcs.forEach((src) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.src = src;
+  });
 }
 
 function pickProjectile(): CritiqueBubble["projectile"] {
@@ -2730,6 +2744,25 @@ function App() {
   }, [route.domain, route.step]);
 
   useEffect(() => {
+    if (route.domain === "home") {
+      preloadImages([foodIcon, writingIcon, fashionIcon, paintingIcon, photoIcon, musicIcon, nextArrow]);
+      return;
+    }
+    const flow = flowByDomain.get(route.domain);
+    const funnySources = foodJudges.flatMap((judge) => judge.funnySrcs || []);
+    preloadImages([
+      flow?.mainSrc,
+      flow?.homeEntry.src,
+      judgePlaceholders,
+      foodFrame04BubbleOne,
+      foodFrame04BubbleTwo,
+      foodFrame04BubbleThree,
+      ...foodJudges.map((judge) => judge.src),
+      ...funnySources,
+    ]);
+  }, [foodJudges, route.domain]);
+
+  useEffect(() => {
     if (route.domain === "home") return;
     if (route.step !== 3) {
       if (route.step < 3) setFoodFunnyFaces({});
@@ -2746,7 +2779,7 @@ function App() {
         const funnyFace = drawFunnyFaceForJudge(judge, foodBubbleIdRef.current);
         if (!funnyFace) return;
         setFoodFunnyFaces((current) => ({ ...current, [judgeIndex]: funnyFace }));
-      }, (revealIndex + 1) * 1000),
+      }, (revealIndex + 1) * 520),
     );
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [foodJudges, route.domain, route.step, tasteComplete, uploadedFoodImage]);
@@ -2768,7 +2801,7 @@ function App() {
     const timer = window.setTimeout(() => {
       playUiBlip("whoosh");
       window.location.hash = hrefFor(route.domain, 4);
-    }, 520);
+    }, 260);
     return () => window.clearTimeout(timer);
   }, [foodFunnyFaces, foodJudges, route.domain, route.step, tasteComplete]);
 
@@ -2790,7 +2823,7 @@ function App() {
   useEffect(() => {
     if (route.domain === "home" || route.step !== 3 || route.domain === "writing" || !uploadedFoodImage) return;
     setTasteComplete(false);
-    const delay = route.domain === "music" ? 5000 : 2000;
+    const delay = route.domain === "music" ? 1800 : 900;
     showFoodToast("细品中……", delay + 240);
     const timer = window.setTimeout(() => setTasteComplete(true), delay);
     return () => window.clearTimeout(timer);
@@ -2802,7 +2835,7 @@ function App() {
     setFoodJudgesRevealed(false);
     const timer = window.setTimeout(() => {
       window.location.hash = hrefFor(route.domain, 2);
-    }, 850);
+    }, 420);
     return () => window.clearTimeout(timer);
   }, [route]);
 
@@ -2813,7 +2846,7 @@ function App() {
       setFoodJudges(nextJudges);
       setJudgeRevealOrder(drawRevealOrder(nextJudges.length));
       setFoodJudgesReady(true);
-    }, 700);
+    }, 260);
     return () => window.clearTimeout(timer);
   }, [foodJudgesReady, route]);
 
@@ -2821,7 +2854,7 @@ function App() {
     if (route.domain === "home" || route.step !== 2 || !foodJudgesReady) return;
     const timer = window.setTimeout(() => {
       setFoodJudgesRevealed(true);
-    }, 1700);
+    }, 980);
     return () => window.clearTimeout(timer);
   }, [foodJudgesReady, route]);
 
@@ -2879,7 +2912,7 @@ function App() {
     const cleanText = writingText.trim();
     if (!cleanText || route.domain !== "writing") return;
     setTasteComplete(false);
-    showFoodToast("细品中……", 2240);
+    showFoodToast("细品中……", 1120);
     setUploadedFoodAnalysis({
       cues: `用户写下了${cleanText.slice(0, 14)}`,
       kind: "文学作品",
@@ -2888,7 +2921,7 @@ function App() {
     window.setTimeout(() => {
       setFoodFunnyFaces({});
       const revealOrder = drawFunnyRevealOrder(foodJudges);
-      showFoodToast("等待评委变脸中...", revealOrder.length * 1000 + 900);
+      showFoodToast("等待评委变脸中...", revealOrder.length * 520 + 520);
       revealOrder.forEach((judgeIndex, revealIndex) => {
         window.setTimeout(() => {
           const judge = foodJudges[judgeIndex] || writingJudgePool[judgeIndex] || foodJudgePool[judgeIndex];
@@ -2897,15 +2930,15 @@ function App() {
           const funnyFace = drawFunnyFaceForJudge(judge, foodBubbleIdRef.current);
           if (!funnyFace) return;
           setFoodFunnyFaces((current) => ({ ...current, [judgeIndex]: funnyFace }));
-        }, (revealIndex + 1) * 1000);
+        }, (revealIndex + 1) * 520);
       });
       window.setTimeout(() => {
         setTasteComplete(true);
         playUiBlip("whoosh");
         showFoodToast("点击评委头像，请求评委锐评", 2600);
         window.location.hash = hrefFor("writing", 4);
-      }, (revealOrder.length + 1) * 1000 + 520);
-    }, 2000);
+      }, (revealOrder.length + 1) * 520 + 260);
+    }, 900);
   }
 
   async function triggerJudgeCritique(index: number) {
@@ -2914,14 +2947,7 @@ function App() {
     const critiqueDomain = route.domain === "home" ? "food" : route.domain;
     const judge = foodJudges[index] || judgePoolsByDomain[critiqueDomain]?.[index] || foodJudgePool[index];
     const bubbleId = foodBubbleIdRef.current;
-    const generatedText = await requestDeepSeekText({
-      analysis: uploadedFoodAnalysis,
-      domain: critiqueDomain,
-      judge,
-      purpose: "critique",
-      writingText,
-    });
-    const text = generatedText || pickCritiqueLine(judge, uploadedFoodAnalysis, critiqueDomain);
+    const fallbackText = pickCritiqueLine(judge, uploadedFoodAnalysis, critiqueDomain);
     setFoodJudgeBubbles((current) => [
       ...current,
       {
@@ -2929,9 +2955,18 @@ function App() {
         judgeId: judge.id,
         projectile: pickProjectile(),
         slot: index,
-        text,
+        text: fallbackText,
       },
     ]);
+    const generatedText = await requestDeepSeekText({
+      analysis: uploadedFoodAnalysis,
+      domain: critiqueDomain,
+      judge,
+      purpose: "critique",
+      writingText,
+    });
+    if (!generatedText || generatedText === fallbackText) return;
+    setFoodJudgeBubbles((current) => current.map((bubble) => (bubble.id === bubbleId ? { ...bubble, text: generatedText } : bubble)));
   }
 
   async function handleDownloadCritique() {
